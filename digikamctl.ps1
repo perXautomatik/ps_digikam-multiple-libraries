@@ -1,4 +1,5 @@
-#!/bin/bash
+# Equivalent of #!/bin/bash
+# Replace with a PowerShell comment or leave blank
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4 foldmethod=marker
 # ----------------------------------------------------------------------
 # Author:   DeaDSouL (Mubarak Alrashidi)
@@ -13,12 +14,12 @@
 # -------------------------------------------------------
 
 # Where do libraries live
-REPO="${HOME}/Pictures/DigiKams"
+$repoPath = "$env:USERPROFILE\Pictures\DigiKams"
 
 # How did you install digikam
 # 1 = digikam was installed via package manager like dnf
 # 2 = digikam was installed via flatpak
-EDITION=2
+$edition = 2 # 1 for package manager, 2 for flatpak
 
 # -------------------------------------------------------
 # You don't have to change anything else below this line.
@@ -28,64 +29,79 @@ EDITION=2
 
 # Variables #{{{
 # Date & Time
-DATE=$(date +'%Y%m%d')
-TIME=$(date +'%H%M%S')
+$DATE = (Get-Date).ToString("yyyyMMdd")
+$TIME = (Get-Date).ToString("HHmmss")
 
 # Script name
-DIGIKAMCTL=$(basename $0)
+$DIGIKAMCTL = $MyInvocation.MyCommand.Name
 
 # RC SRC
-RC_FILE="digikamrc"
+$RC_FILE = "digikamrc"
 
 # RC Template
-RC_TEMP="digikamrc.template"
+$RC_TEMP = "digikamrc.template"
 
 # RC DST (1:pkg, 2:flatpak)
-declare -a RC_PATH
-RC_PATH[1]="${HOME}/.config/digikamrc"
-RC_PATH[2]="${HOME}/.var/app/org.kde.digikam/config/digikamrc"
-RC_DST="${RC_PATH[$EDITION]}"
+$RC_DST = if ($EDITION -eq 1) { "$HOME\.config\digikamrc" } else { "$HOME\.var\app\org.kde.digikam\config\digikamrc" }
+$digikamRcPath = $RC_DST
 
 # Temp path
-_TMPDIR=/tmp/nohups/digikam
+$_TMPDIR = "$env:TEMP\nohups\digikam"
 
 # Current path
-CDIR=$(pwd)
+$CDIR = (Get-Location).Path
 #}}}
 
+<#
 function bkp_rc() { #{{{
-    [[ -f "${RC_DST}" && ! -L "${RC_DST}" ]] && mv -v "${RC_DST}" "${RC_DST}.bkp-${DATE}_${TIME}"
+#>
+function Backup-DigikamRc {
+    if (Test-Path $RC_DST -PathType Leaf) {
+        Move-Item $RC_DST ("$RC_DST.bkp-$DATE_$TIME")
+    }
 } #}}}
-
+make-alias -name bkp_rc -value Backup-DigikamRc
+<#
 function used_lib() { #{{{
-    [[ -f "${RC_DST}" && -L "${RC_DST}" ]] && basename $(dirname $(readlink "${RC_DST}") )
+#>
+function Get-ActiveLibrary {
+    if (Test-Path "$digikamRcPath" -PathType SymbolicLink) {
+        return (Resolve-Path "$digikamRcPath").Parent.Name
+    }
 } #}}}
+make-alias -name used_lib -value Get-ActiveLibrary
 
+<#
 function use_lib() { #{{{
-    if [ -z "${1}" ]; then
-        echo "[ERROR]: Missing library name to activate."
-        return 1
-    elif [ -d "${DKLIB}" ]; then
-        echo "Activating '${1}' library now.."
+#>
+function Activate-Library {
+    if ($null -eq $args[0]) {
+        Write-Error "Missing library name to activate."
+    } elseif (Test-Path "$DKLIB") {
+        Write-Host "Activating '$args[0]' library now.."
         # backup original digikamrc (if it was a file instead of symlink)
         bkp_rc
         # make symbolic links
-        ln -svf "${DKLIB}/${RC_FILE}" "${RC_DST}"
-        if [ $? == 0 ]; then
-            echo "'$1' library has been successfully activated."
-            return 0
-        else
-            echo "[ERROR]: Could not activate '$1' library."
-            return 1
-        fi
-    else
-        echo "[ERROR]: There is no library called '${1}'. You may want to create it first."
-        return 1
-    fi
+        New-Item -ItemType SymbolicLink -Path $RC_DST -Target "$DKLIB\$RC_FILE"
+        if ($?) {
+            Write-Host "'$args[0]' library has been successfully activated."
+        } else {
+            Write-Error "[ERROR]: Could not activate '$args[0]' library."
+        }
+    } else {
+        Write-Error "[ERROR]: There is no library called '$args[0]'. You may want to create it first."
+    }
 } #}}}
 
+<#
 function open_lib() { #{{{
+#>
+function Open-Library {
     # Activating library if it wasn't
+    if ($activeLibrary -ne $libraryName) {
+        Activate-Library $libraryName
+    }
+    <#
     if [ "${USEDDKL}" != "${1}" ]; then
         use_lib "${1}"
         if [ $? != 0 ]; then
@@ -93,100 +109,76 @@ function open_lib() { #{{{
             return 1
         fi
     fi
-    echo "Opening '${1}' library.."
+    #>
+    Write-Host "Opening '$libraryName' library.."
     # Digikam commands (1:pkg, 2:flatpak)
-    if [ "${EDITION}" -eq 1 ]; then
-        cd "${_TMPDIR}"
-        nohup /usr/bin/digikam &
-        cd "${CDIR}"
-    elif [ "${EDITION}" -eq 2 ]; then
-        cd "${_TMPDIR}"
-        nohup /usr/bin/flatpak run --branch=stable --arch=x86_64 --command=digikam org.kde.digikam -qwindowtitle "${1}" &
-        cd "${CDIR}"
-    else
+    if ($edition -eq 1) {
+        Start-Process "digikam" -WorkingDirectory $tempDir
+    } elseif ($edition -eq 2) {
+        # Equivalent to flatpak run command in Bash
+        # Replace with the appropriate flatpak command for your environment
+        Start-Process "flatpak" -ArgumentList "run", "--branch=stable", "--arch=x86_64", "--command=digikam", "org.kde.digikam", "-qwindowtitle", $libraryName -WorkingDirectory $tempDir
+    } else {
         echo '[ERROR]: Unknown Digikam edition'
-        return 1
-    fi
-    return 0
+    }
 } #}}}
 
+<#
 function mk_lib() { #{{{
-    if [ -z "${1}" ]; then
-        echo "[ERROR]: Missing library name."
-        return 1
-    elif [ ! -f "${REPO}/${RC_TEMP}" ]; then
-        echo "[ERROR]: Could not find '${RC_TEMP}'."
-        echo "You need to have a copy of a digikamrc saved in: '${REPO}/${RC_TEMP}'"
-        return 1
-    elif [ ! -d "${DKLIB}" ]; then
-        echo "Creating '${1}' library now.."
-        mkdir -p "${DKLIB}/Database"
-        echo -e '[Desktop Entry]\nIcon=digikam' > "${DKLIB}/.directory"
-        cp -vp "${REPO}/${RC_TEMP}" "${DKLIB}/${RC_FILE}"
-        sed -i "s,Database Name=.*,Database Name=${DKLIB}\/Database\/,g" "${DKLIB}/${RC_FILE}"
-        sed -i "s,Database Name Face=.*,Database Name Face=${DKLIB}\/Database\/,g" "${DKLIB}/${RC_FILE}"
-        sed -i "s,Database Name Similarity=.*,Database Name Similarity=${DKLIB}\/Database\/,g" "${DKLIB}/${RC_FILE}"
-        sed -i "s,Database Name Thumbnails=.*,Database Name Thumbnails=${DKLIB}\/Database\/,g" "${DKLIB}/${RC_FILE}"
-        echo "The '${1}' library has been successfully created.."
-        return 0
-    else
-        echo "[ERROR]: The '${1}' library exists."
-        return 1
-    fi
+#>
+function Create-Library {
+    if (Test-Path "$libraryPath") {
+        Write-Host "[ERROR]: The '$libraryName' library exists."
+    } else {
+        echo "Creating '$libraryName' library now.."
+        New-Item -Path "$libraryPath" -ItemType Directory
+        New-Item -Path "$libraryPath\.directory" -ItemType File -Value '[Desktop Entry]\nIcon=digikam'
+        Copy-Item "$repoPath\$digikamRcFile" "$libraryPath\$digikamRcFile"
+        (Get-Content "$libraryPath\$digikamRcFile") | ForEach-Object {
+            $_ -replace "Database Name=.*", "Database Name=$libraryPath\Database\"
+        } | Set-Content "$libraryPath\$digikamRcFile"
+        echo "The '$libraryName' library has been successfully created.."
+    }
 } #}}}
 
+<#
 function rm_lib() { #{{{
-    if [ -z "${1}" ]; then
-        echo "[ERROR]: Missing library name to remove."
-        return 1
-    elif [ "${USEDDKL}" == "${1}" ]; then
-        echo "[ERROR]: Can not remove an activated library '${1}'."
-        echo "[ERROR]: You need to activate another library first."
-        return 1
-    elif [ -d "${1}" ]; then
-        echo 'We are going to remove the following library:'
-        echo "${REPO}/${1}"
-        while [[ "${ANSWER}" != 'y' && "${ANSWER}" != 'n' ]]; do
-            read -p 'Remove it? (N/y): ' ANSWER
-            [ -z "${ANSWER}" ] && ANSWER='n'
-        done
-        if [ "${ANSWER}" == 'y' ]; then
-            echo "Removing '${1}'.."
-            rm -rv "${REPO}/${1}"
-            if [ $? == 0 ]; then
-                echo "The '${1}' library has been successfully removed."
-                return 0
-            else
-                echo "[ERROR]: Could not remove '${1}' library!"
-                return 1
-            fi
-        else
-            echo "Keeping '${1}' library."
-            return 0
-        fi
-    else
-        echo "[ERROR]: '${1}' doesn't exist or it's not a directory."
-        return 1
-    fi
+#>
+function Remove-Library {
+    if (Test-Path "$libraryPath") {
+        Write-Host "We are going to remove the following library:"
+        Write-Host "$libraryPath"
+        $answer = Read-Host "Remove it? (N/y): "
+        if ($answer -eq 'y') {
+            Write-Host "Removing '$libraryName'.."
+            Remove-Item -Path "$libraryPath" -Recurse -Force
+            Write-Host "The '$libraryName' library has been successfully removed."
+        } else {
+            Write-Host "Keeping '$libraryName' library."
+        }
+    } else {
+        Write-Host "[ERROR]: '$libraryName' doesn't exist or it's not a directory."
+    }
 } #}}}
 
+<#
 function ls_libs() { #{{{
+#>
+function List-Libraries {
     echo 'Available libraries:'
-    declare -a DKLIBS
-    DKLIBS=$(find "${REPO}/" -maxdepth 1 -mindepth 1 -type d -exec basename "{}" \;)
-    if [[ $(echo "${DKLIBS[@]}") == '' ]]; then
-        echo 'There are no libraries to list. You may want to create one first'
-        echo "  Type: ${DIGIKAMCTL} new myLibrary"
-    else
-        for DKL in ${DKLIBS[@]}; do
-            if [[ "${USEDDKL}" == "${DKL}" ]]; then echo " * ${DKL}"
-            else echo "   ${DKL}"; fi
-        done
-    fi
+    Get-ChildItem "$repoPath" -Directory | ForEach-Object {
+        if ($activeLibrary -eq $_.Name) {
+            Write-Host " * $($_.Name)"
+        } else {
+            Write-Host "  $($_.Name)"
+        }
+    }
 } #}}}
-
+<#
 function show_usage() { #{{{
-    echo "USAGE: ${DIGIKAMCTL} run <LIB> | use <LIB> | new <LIB> | rm <LIB> | ls | help"
+#>
+function Show-Usage {
+    Write-Host "USAGE: $scriptName run <LIB> | use <LIB> | new <LIB> | rm <LIB> | ls | help"
     echo "    run <LIB>         To open a library."
     echo "                      Aliases: open."
     echo "    use <LIB>         To activate a library."
@@ -203,38 +195,43 @@ function show_usage() { #{{{
 
 function init() { #{{{
     # create tmp dir
-    [ ! -e  "${_TMPDIR}" ] && mkdir -p "${_TMPDIR}"
-    # make sure tmp dir exists
-    if [ ! -d  "${_TMPDIR}" ]; then
-        echo 'Could not create the tmp directory.. exiting now'
-        exit 1
-    fi
-    [ ! -d "${REPO}" ] && mkdir -p "${REPO}"
-    pgrep '^digikam$' >/dev/null
-    if [[ $? == 0 ]]; then
-        echo "[ERROR]: You need to close 'DigiKam' first."
-        exit 1
-    fi
-    DKLIB="${REPO}/${1}"
-    USEDDKL=$(used_lib)
-    return 0
-} #}}}
+    if (!(Test-Path $tempDir)) {
+        New-Item -Path $tempDir -ItemType Directory
+    }
 
-function e() { #{{{
-    $1 "${2}"
-    exit $?
+    # Ensure Digikam is not running
+    if (Get-Process digikam) {
+        Write-Host "[ERROR]: You need to close 'DigiKam' first."
+        Exit
+    }
+
+    $libraryPath = "$repoPath\$libraryName"
+    $activeLibrary = Get-ActiveLibrary
 } #}}}
 
 # ----------------------------------------------------------------------
 
 # Main ($1: action, $2: library name)
-init "${2}"
-case "$1" in
-    run|open)               e 'open_lib' "${2}" ;;
-    use|activate)           e 'use_lib' "${2}"  ;;
-    create|mk|make|new)     e 'mk_lib' "${2}"   ;;
-    rm|remove)              e 'rm_lib' "${2}"   ;;
-    ls|list|libs)           e 'ls_libs'         ;;
-    help|h)                 e 'show_usage'      ;;
-    *) echo "Try: ${DIGIKAMCTL} help"; exit 1   ;;
-esac
+
+# Get the script name
+$scriptName = $MyInvocation.MyCommand.Name
+
+# Initialize the script
+Init $args[1]
+
+switch ($args[0]) {
+    'run' { Open-Library $args[1] }
+    'use' { Activate-Library $args[1] }
+    'create' { Create-Library $args[1] }
+    'mk' { Create-Library $args[1] }
+    'make' { Create-Library $args[1] }
+    'new' { Create-Library $args[1] }
+    'rm' { Remove-Library $args[1] }
+    'remove' { Remove-Library $args[1] }
+    'ls' { List-Libraries }
+    'list' { List-Libraries }
+    'libs' { List-Libraries }
+    'help' { Show-Usage }
+    'h' { Show-Usage }
+    default { Write-Host "Try: $scriptName help"; Exit }
+}
