@@ -14,12 +14,12 @@
 # -------------------------------------------------------
 
 # Where do libraries live
-$repoPath = "$env:USERPROFILE\Pictures\DigiKams"
+$Global:repoPath = "$env:USERPROFILE\Pictures\DigiKams"
 
 # How did you install digikam
-# 1 = digikam was installed via package manager like dnf
+# 1 = digikam was installed via package manager like dnf / or windows executable
 # 2 = digikam was installed via flatpak
-$edition = 2 # 1 for package manager, 2 for flatpak
+$global:edition = 1 # 1 for package manager, 2 for flatpak
 
 # -------------------------------------------------------
 # You don't have to change anything else below this line.
@@ -33,111 +33,127 @@ $DATE = (Get-Date).ToString("yyyyMMdd")
 $TIME = (Get-Date).ToString("HHmmss")
 
 # Script name
-$DIGIKAMCTL = $MyInvocation.MyCommand.Name
+$Global:DIGIKAMCTL = $MyInvocation.MyCommand.Name
 
 # RC SRC
-$RC_FILE = "digikamrc"
+$Global:RC_FILE = "digikamrc"
 
 # RC Template
-$RC_TEMP = "digikamrc.template"
-
+$Global:RC_TEMP = "digikamrc.template"
 # RC DST (1:pkg, 2:flatpak)
-$RC_DST = if ($EDITION -eq 1) { "$HOME\.config\digikamrc" } else { "$HOME\.var\app\org.kde.digikam\config\digikamrc" }
-$digikamRcPath = $RC_DST
-
+$Global:RC_DST = if ($EDITION -eq 1) { "$HOME\.config\digikamrc" } else { "$HOME\.var\app\org.kde.digikam\config\digikamrc" }
+$Global:activeLibrary = $null
+$global:libraries = @()
+$Global:libraryPath = ""
 # Temp path
-$_TMPDIR = "$env:TEMP\nohups\digikam"
+$Global:_TMPDIR = "$env:TEMP\nohups\digikam"
 
 # Current path
-$CDIR = (Get-Location).Path
+$global:CDIR = (Get-Location).Path
 #}}}
 
 <#
 function bkp_rc() { #{{{
 #>
 function Backup-DigikamRc {
-    if (Test-Path $RC_DST -PathType Leaf) {
-        Move-Item $RC_DST ("$RC_DST.bkp-$DATE_$TIME")
+    if (Test-Path $Global:RC_DST -PathType Leaf) {
+        Move-Item $Global:RC_DST ("$Global:RC_DST.bkp-$($DATE)_$TIME")
     }
 } #}}}
-make-alias -name bkp_rc -value Backup-DigikamRc
+
 <#
 function used_lib() { #{{{
 #>
 function Get-ActiveLibrary {
-    if (Test-Path "$digikamRcPath" -PathType SymbolicLink) {
-        return (Resolve-Path "$digikamRcPath").Parent.Name
+    if (Test-Path -Path $Global:RC_DST -PathType Leaf -and (Get-Item $Global:RC_DST).LinkType -eq 'SymbolicLink') {
+        $linkTarget = (Get-Item $Global:RC_DST).Target
+        $parentDir = Split-Path -Path $linkTarget -Parent
+        [System.IO.Path]::GetFileName($parentDir)
     }
 } #}}}
-make-alias -name used_lib -value Get-ActiveLibrary
 
 <#
 function use_lib() { #{{{
 #>
 function Activate-Library {
     if ($null -eq $args[0]) {
-        Write-Error "Missing library name to activate."
-    } elseif (Test-Path "$DKLIB") {
-        Write-Host "Activating '$args[0]' library now.."
+        echo "[ERROR]: Missing library name to activate."
+    } elseif (Test-Path "$global:libraryPath") {
+        Write-Host "Activating '$($args[0])' library now.."
         # backup original digikamrc (if it was a file instead of symlink)
-        bkp_rc
+        Backup-DigikamRc
         # make symbolic links
-        New-Item -ItemType SymbolicLink -Path $RC_DST -Target "$DKLIB\$RC_FILE"
+        New-Item -ItemType SymbolicLink -Path $Global:RC_DST -Target "$global:libraryPath\$Global:RC_FILE"
         if ($?) {
-            Write-Host "'$args[0]' library has been successfully activated."
+            Write-Host "'$($args[0])' library has been successfully activated."
         } else {
-            Write-Error "[ERROR]: Could not activate '$args[0]' library."
+            Write-Error "[ERROR]: Could not activate '$($args[0])' library."
         }
     } else {
-        Write-Error "[ERROR]: There is no library called '$args[0]'. You may want to create it first."
+        Write-Error "[ERROR]: There is no library called '$($args[0])'. You may want to create it first."
     }
 } #}}}
 
 <#
 function open_lib() { #{{{
 #>
-function Open-Library {
+function Open-Library { 
     # Activating library if it wasn't
-    if ($activeLibrary -ne $libraryName) {
-        Activate-Library $libraryName
-    }
-    <#
-    if [ "${USEDDKL}" != "${1}" ]; then
-        use_lib "${1}"
-        if [ $? != 0 ]; then
-            echo "[ERROR]: Since we could not activate '${1}' library, we can not open it."
+    if ($global:activeLibrary -ne $($($args[0]))) {
+        Activate-Library $($($args[0]))
+        if (!$?) {
+            Write-Error "Since we could not activate '$($($args[0]))' library, we can not open it."
             return 1
-        fi
-    fi
-    #>
-    Write-Host "Opening '$libraryName' library.."
+        }
+    }
+
+    echo "Opening '${1}' library.."
     # Digikam commands (1:pkg, 2:flatpak)
-    if ($edition -eq 1) {
-        Start-Process "digikam" -WorkingDirectory $tempDir
-    } elseif ($edition -eq 2) {
+    if ($global:edition -eq 1) {
+        cd $Global:_TMPDIR
+        Start-Process "digikam" -WorkingDirectory $Global:_TMPDIR
+        cd $global:CDIR
+    } elseif ($global:edition -eq 2) {
         # Equivalent to flatpak run command in Bash
         # Replace with the appropriate flatpak command for your environment
-        Start-Process "flatpak" -ArgumentList "run", "--branch=stable", "--arch=x86_64", "--command=digikam", "org.kde.digikam", "-qwindowtitle", $libraryName -WorkingDirectory $tempDir
+        Start-Process "flatpak" -ArgumentList "run", "--branch=stable", "--arch=x86_64", "--command=digikam", "org.kde.digikam", "-qwindowtitle", $($($args[0])) -WorkingDirectory $Global:_TMPDIR
     } else {
-        echo '[ERROR]: Unknown Digikam edition'
+        echo '[ERROR]: Unknown Digikam global:edition'
+        return 1
     }
+
+    return 0
 } #}}}
 
 <#
 function mk_lib() { #{{{
 #>
 function Create-Library {
-    if (Test-Path "$libraryPath") {
-        Write-Host "[ERROR]: The '$libraryName' library exists."
+    if ([string]::IsNullOrEmpty($($args[0]))) {
+        echo "[ERROR]: Missing library name."
+        return 1
+    } elseif (-not (Test-Path -Path "$Global:RepoPath\$Global:Rc_Temp")) {
+        Write-Error "[ERROR]: Could not find '$Global:Rc_Temp'."
+        Write-Output "You need to have a copy of a digikamrc saved in: '$Global:RepoPath\$Global:Rc_Temp'"
+        return 1
+    } elseif (-not (Test-Path -Path $global:libraryPath)) {
+        echo "Creating '$($args[0])' library now.."
+        $dbfolder = New-Item -Path "$global:libraryPath\Database" -ItemType Directory -Force -passthrough
+        Set-Content -Path "$global:libraryPath\.directory" -Value '[Desktop Entry]`nIcon=digikam'
+        Copy-Item -Path "$Global:RepoPath\$Global:Rc_Temp" -Destination "$global:libraryPath\$global:Rc_File" -Force
+
+        $content = Get-Content -Path "$global:libraryPath\$global:Rc_File"
+        $content = $content -replace "Database Name=.*", "Database Name=$($dbfolder)"
+        $content = $content -replace "Database Name Face=.*", "Database Name Face=$($dbfolder)"
+        $content = $content -replace "Database Name Similarity=.*", "Database Name Similarity=$($dbfolder)"
+        $content = $content -replace "Database Name Thumbnails=.*", "Database Name Thumbnails=$($dbfolder)"
+        Set-Content -Path "$global:libraryPath\$global:Rc_File" -Value $content
+
+        Write-Output "The '$($args[0])' library has been successfully created.."
+        return 0
     } else {
-        echo "Creating '$libraryName' library now.."
-        New-Item -Path "$libraryPath" -ItemType Directory
-        New-Item -Path "$libraryPath\.directory" -ItemType File -Value '[Desktop Entry]\nIcon=digikam'
-        Copy-Item "$repoPath\$digikamRcFile" "$libraryPath\$digikamRcFile"
-        (Get-Content "$libraryPath\$digikamRcFile") | ForEach-Object {
-            $_ -replace "Database Name=.*", "Database Name=$libraryPath\Database\"
-        } | Set-Content "$libraryPath\$digikamRcFile"
-        echo "The '$libraryName' library has been successfully created.."
+        Write-Error "[ERROR]: The '$($args[0])' library exists."
+        return 1
     }
 } #}}}
 
@@ -145,19 +161,32 @@ function Create-Library {
 function rm_lib() { #{{{
 #>
 function Remove-Library {
-    if (Test-Path "$libraryPath") {
-        Write-Host "We are going to remove the following library:"
-        Write-Host "$libraryPath"
+    if ($null -eq $args[0]) {
+        Write-Error "[ERROR]: Missing library name to remove."
+        return 1
+    }
+
+    if ($global:activeLibrary -eq $($args[0])) {
+        echo "[ERROR]: Can not remove an activated library '$($args[0])'."
+        echo "[ERROR]: You need to activate another library first."
+        return 1
+    }
+
+    if (Test-Path "$Global:libraryPath") {
+        echo 'We are going to remove the following library:'
+        Write-Host "$Global:libraryPath"
+
         $answer = Read-Host "Remove it? (N/y): "
         if ($answer -eq 'y') {
-            Write-Host "Removing '$libraryName'.."
-            Remove-Item -Path "$libraryPath" -Recurse -Force
-            Write-Host "The '$libraryName' library has been successfully removed."
+            Write-Host "Removing '$($args[0])'.."
+            Remove-Item -Path "$Global:libraryPath" -Recurse -Force
+            Write-Host "The '$($args[0])' library has been successfully removed."
         } else {
-            Write-Host "Keeping '$libraryName' library."
+            echo "Keeping '$($args[0])' library."
         }
     } else {
-        Write-Host "[ERROR]: '$libraryName' doesn't exist or it's not a directory."
+        Write-Error "[ERROR]: '$($args[0])' doesn't exist or it's not a directory."
+        return 1
     }
 } #}}}
 
@@ -166,14 +195,22 @@ function ls_libs() { #{{{
 #>
 function List-Libraries {
     echo 'Available libraries:'
-    Get-ChildItem "$repoPath" -Directory | ForEach-Object {
-        if ($activeLibrary -eq $_.Name) {
-            Write-Host " * $($_.Name)"
-        } else {
-            Write-Host "  $($_.Name)"
+    
+    SGlobal:et-Variable -Name "libraries" -Value (Get-ChildItem "$global:repoPath" -Directory) -Scope Global 
+    if ($global:libraries.Count -eq 0) {
+        echo 'There are no libraries to list. You may want to create one first'
+        Write-Host "  Type: $Global:DIGIKAMCTL new myLibrary"
+    } else {
+        foreach ($library in $global:libraries) {
+            if ($global:activeLibrary -eq $library.Name) {
+                Write-Host " * $($library.Name)"
+            } else {
+                Write-Host "  $($library.Name)"
+            }
         }
     }
 } #}}}
+
 <#
 function show_usage() { #{{{
 #>
@@ -193,24 +230,29 @@ function Show-Usage {
     return 0
 } #}}}
 
-function init() { #{{{
-    # create tmp dir
-    if (!(Test-Path $tempDir)) {
-        New-Item -Path $tempDir -ItemType Directory
-    }
+function Init {
+    # Create temp dir
+    if (!(Test-Path $Global:_TMPDIR)) { New-Item -Path $Global:_TMPDIR -ItemType Directory -erroraction stop }
+    # make sure tmp dir exists
 
     # Ensure Digikam is not running
-    if (Get-Process digikam) {
-        Write-Host "[ERROR]: You need to close 'DigiKam' first."
+    if (Get-Process digikam -ErrorAction SilentlyContinue) {
+        echo "[ERROR]: You need to close 'DigiKam' first."
         Exit
     }
+    Set-Variable -Name "libraryPath"  -Value "$global:repoPath\$($args[0])" -Scope Global    
+    Set-Variable -Name "activeLibrary" -Value Get-ActiveLibrary -Scope Global    
 
-    $libraryPath = "$repoPath\$libraryName"
-    $activeLibrary = Get-ActiveLibrary
+} #}}}    
+
+<#
+function e() { #{{{
+    $1 "${2}"
+    exit $?
 } #}}}
 
 # ----------------------------------------------------------------------
-
+#>
 # Main ($1: action, $2: library name)
 
 # Get the script name
