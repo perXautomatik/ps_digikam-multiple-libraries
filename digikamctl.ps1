@@ -79,14 +79,95 @@ function Open-Library {
     }
 }
 
-# ... (other functions like Create-Library, Remove-Library, List-Libraries, Show-Usage, Init)
+function Create-Library {
+    if (Test-Path "$libraryPath") {
+        Write-Host "[ERROR]: The '$libraryName' library exists."
+    } else {
+        Write-Host "Creating '$libraryName' library now.."
+        New-Item -Path "$libraryPath" -ItemType Directory
+        New-Item -Path "$libraryPath\.directory" -ItemType File -Value '[Desktop Entry]\nIcon=digikam'
+        Copy-Item "$repoPath\$digikamRcFile" "$libraryPath\$digikamRcFile"
+        (Get-Content "$libraryPath\$digikamRcFile") | ForEach-Object {
+            $_ -replace "Database Name=.*", "Database Name=$libraryPath\Database\"
+        } | Set-Content "$libraryPath\$digikamRcFile"
+        Write-Host "The '$libraryName' library has been successfully created.."
+    }
+}
 
+function Remove-Library {
+    if (Test-Path "$libraryPath") {
+        Write-Host "We are going to remove the following library:"
+        Write-Host "$libraryPath"
+        $answer = Read-Host "Remove it? (N/y): "
+        if ($answer -eq 'y') {
+            Write-Host "Removing '$libraryName'.."
+            Remove-Item -Path "$libraryPath" -Recurse -Force
+            Write-Host "The '$libraryName' library has been successfully removed."
+        } else {
+            Write-Host "Keeping '$libraryName' library."
+        }
+    } else {
+        Write-Host "[ERROR]: '$libraryName' doesn't exist or it's not a directory."
+    }
+}
+
+function List-Libraries {
+    Write-Host 'Available libraries:'
+    Get-ChildItem "$repoPath" -Directory | ForEach-Object {
+        if ($activeLibrary -eq $_.Name) {
+            Write-Host " * $($_.Name)"
+        } else {
+            Write-Host "  $($_.Name)"
+        }
+    }
+}
+
+function Show-Usage {
+    Write-Host "USAGE: $scriptName run <LIB> | use <LIB> | new <LIB> | rm <LIB> | ls | help"
+    Write-Host "  run <LIB>       To open a library."
+    Write-Host "  use <LIB>       To activate a library."
+    Write-Host "  mk <LIB>        To create a library."
+    Write-Host "  rm <LIB>        To remove a library."
+    Write-Host "  ls              To list all available libraries."
+    Write-Host "  help            To show this menu."
+}
+
+function Init {
+    # Create temp dir
+    if (!(Test-Path $tempDir)) {
+        New-Item -Path $tempDir -ItemType Directory
+    }
+
+    # Ensure Digikam is not running
+    if (Get-Process digikam) {
+        Write-Host "[ERROR]: You need to close 'DigiKam' first."
+        Exit
+    }
+
+    $libraryPath = "$repoPath\$libraryName"
+    $activeLibrary = Get-ActiveLibrary
+}
 # Main
-init $args[1]
+
+# Get the script name
+$scriptName = $MyInvocation.MyCommand.Name
+
+# Initialize the script
+Init $args[1]
 
 switch ($args[0]) {
-    'run' { open_lib $args[1] }
-    'use' { use_lib $args[1] }
-    'create' { mk_lib $args[1] }
-    # ... (rest of the cases)
+    'run' { Open-Library $args[1] }
+    'use' { Activate-Library $args[1] }
+    'create' { Create-Library $args[1] }
+    'mk' { Create-Library $args[1] }
+    'make' { Create-Library $args[1] }
+    'new' { Create-Library $args[1] }
+    'rm' { Remove-Library $args[1] }
+    'remove' { Remove-Library $args[1] }
+    'ls' { List-Libraries }
+    'list' { List-Libraries }
+    'libs' { List-Libraries }
+    'help' { Show-Usage }
+    'h' { Show-Usage }
+    default { Write-Host "Try: $scriptName help"; Exit }
 }
