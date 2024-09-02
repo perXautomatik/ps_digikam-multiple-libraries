@@ -1,4 +1,5 @@
-#!/bin/bash
+# Equivalent of #!/bin/bash
+# Replace with a PowerShell comment or leave blank
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4 foldmethod=marker
 # ----------------------------------------------------------------------
 # Author:   DeaDSouL (Mubarak Alrashidi)
@@ -18,15 +19,25 @@ $repoPath = "$env:USERPROFILE\Pictures\DigiKams"
 # How did you install digikam
 # 1 = digikam was installed via package manager like dnf
 # 2 = digikam was installed via flatpak
-$edition = 2
+$edition = 2 # 1 for package manager, 2 for flatpak
 
-# Functions
+# Variables
+$DATE = (Get-Date).ToString("yyyyMMdd")
+$TIME = (Get-Date).ToString("HHmmss")
+$DIGIKAMCTL = $MyInvocation.MyCommand.Name
+$RC_FILE = "digikamrc"
+$RC_TEMP = "digikamrc.template"
+$RC_DST = if ($EDITION -eq 1) { "$HOME\.config\digikamrc" } else { "$HOME\.var\app\org.kde.digikam\config\digikamrc" }
+$digikamRcPath = $RC_DST
+$_TMPDIR = "$env:TEMP\nohups\digikam"
+$CDIR = (Get-Location).Path
 
 function Backup-DigikamRc {
-    if (Test-Path "$digikamRcPath" -PathType Leaf) {
-        Move-Item "$digikamRcPath" ("$digikamRcPath.bkp-" + (Get-Date -Format "yyyyMMdd_HHmmss"))
+    if (Test-Path $RC_DST -PathType Leaf) {
+        Move-Item $RC_DST ("$RC_DST.bkp-$DATE_$TIME")
     }
 }
+make-alias -name bkp_rc -value Backup-DigikamRc
 
 function Get-ActiveLibrary {
     if (Test-Path "$digikamRcPath" -PathType SymbolicLink) {
@@ -34,14 +45,20 @@ function Get-ActiveLibrary {
     }
 }
 
-function Activate-Library {
-    if (Test-Path "$libraryPath") {
-        Write-Host "Activating '$libraryName' library now.."
-        Backup-DigikamRc
-        New-Item -ItemType SymbolicLink -Path "$digikamRcPath" -Target "$libraryPath\$digikamRcFile"
-        Write-Host "'$libraryName' library has been successfully activated."
+function use_lib {
+    if ($null -eq $args[0]) {
+        Write-Error "Missing library name to activate."
+    } elseif (Test-Path "$DKLIB") {
+        Write-Host "Activating '$args[0]' library now.."
+        bkp_rc
+        New-Item -ItemType SymbolicLink -Path $RC_DST -Target "$DKLIB\$RC_FILE"
+        if ($?) {
+            Write-Host "'$args[0]' library has been successfully activated."
+        } else {
+            Write-Error "Could not activate '$args[0]' library."
+        }
     } else {
-        Write-Host "[ERROR]: There is no library called '$libraryName'. You may want to create it first."
+        Write-Error "There is no library called '$args[0]'. You may want to create it first."
     }
 }
 
@@ -65,9 +82,11 @@ function Open-Library {
 # ... (other functions like Create-Library, Remove-Library, List-Libraries, Show-Usage, Init)
 
 # Main
+init $args[1]
 
-# Equivalent to $1 and $2 in Bash
-$action = $args[0]
-$libraryName = $args[1]
-
-# ... (main logic using the functions)
+switch ($args[0]) {
+    'run' { open_lib $args[1] }
+    'use' { use_lib $args[1] }
+    'create' { mk_lib $args[1] }
+    # ... (rest of the cases)
+}
